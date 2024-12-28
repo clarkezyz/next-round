@@ -1,0 +1,282 @@
+// This is your Prisma schema file
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// User model for authentication and profile information
+model User {
+  id            String    @id @default(cuid())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?   // Profile image URL
+  points        Int       @default(0)
+  password    String?   // For credentials auth
+  
+  // Social links
+  instagramHandle String?
+  twitterHandle   String?
+  
+  // Relationships
+  accounts      Account[]
+  sessions      Session[]
+  scans         Scan[]          // Coasters this user has scanned
+  artworks      Artwork[]       // Artwork submitted by this user
+  comments      Comment[]
+  reactions     Reaction[]
+  achievements  Achievement[]
+  messages      Message[]       // Messages sent by this user
+  receivedMessages Message[] @relation("MessageReceiver")
+  dailyScans    DailyScanCount[]
+}
+
+// NextAuth.js required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Artwork model for the images on coasters
+model Artwork {
+  id          String    @id @default(cuid())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  title       String?
+  description String?
+  
+  // Image URLs for different sizes/purposes
+  originalUrl String    // Original uploaded image
+  printUrl    String    // Print-ready version
+  webUrl      String    // Web-optimized version
+  thumbnailUrl String   // Thumbnail version
+  
+  // Metadata
+  status      ArtworkStatus @default(PENDING)
+  fileSize    Int
+  colorProfile Json?        // Store color analysis results
+  categories  String[]      // Array of category tags
+  
+  // Relationships
+  artistId    String
+  artist      User      @relation(fields: [artistId], references: [id])
+  coasters    Coaster[]
+  inspiredBy  Scan?     @relation("ArtworkInspiration", fields: [inspiredByScanId], references: [id])
+  inspiredByScanId String?
+
+  @@index([status])
+  @@index([artistId])
+}
+
+enum ArtworkStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PRINTED
+  ARCHIVED
+}
+
+// Physical coaster tracking
+model Coaster {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  qrCode      String   @unique
+  nfcId       String?  @unique
+  
+  // Relationships
+  artworkId   String
+  artwork     Artwork  @relation(fields: [artworkId], references: [id])
+  venueId     String?
+  venue       Venue?   @relation(fields: [venueId], references: [id])
+  scans       Scan[]
+  
+  // Tracking
+  status      CoasterStatus @default(ACTIVE)
+  batchNumber String?
+  
+  @@index([venueId])
+  @@index([status])
+}
+
+enum CoasterStatus {
+  ACTIVE
+  INACTIVE
+  LOST
+  DAMAGED
+}
+
+// Track coaster scans
+model Scan {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  
+  // Relationships
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  coasterId   String
+  coaster     Coaster  @relation(fields: [coasterId], references: [id])
+  
+  // Scan details
+  isFirstScan Boolean  @default(false)
+  pointsEarned Int
+  location    Json?    // Geolocation data
+  deviceInfo  String?
+  
+  // Social elements
+  comment     Comment?
+  reactions   Reaction[]
+  inspiredArtworks Artwork[] @relation("ArtworkInspiration")
+
+  @@index([userId])
+  @@index([coasterId])
+  @@index([createdAt])
+}
+
+// Track daily scan limits
+model DailyScanCount {
+  id        String   @id @default(cuid())
+  date      DateTime
+  count     Int      @default(0)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+}
+
+// Comments on scans
+model Comment {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  content   String
+  
+  // Relationships
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  scanId    String   @unique  // One comment per scan
+  scan      Scan     @relation(fields: [scanId], references: [id])
+}
+
+// Emoji reactions on scans
+model Reaction {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  emoji     String
+  
+  // Relationships
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  scanId    String
+  scan      Scan     @relation(fields: [scanId], references: [id])
+
+  @@unique([userId, scanId])  // One reaction per user per scan
+}
+
+// Venue information
+model Venue {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  name        String
+  address     String
+  city        String
+  state       String
+  zipCode     String
+  country     String
+  
+  // Contact info
+  email       String?
+  phone       String?
+  website     String?
+  
+  // Location data
+  latitude    Float?
+  longitude   Float?
+  
+  // Relationships
+  coasters    Coaster[]
+  status      VenueStatus @default(PENDING)
+  
+  // Metrics
+  totalScans  Int       @default(0)
+  rating      Float?    // Optional venue rating
+
+  @@index([status])
+  @@index([city, state])
+}
+
+enum VenueStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  BANNED
+}
+
+// User achievements
+model Achievement {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  type        String
+  description String
+  
+  // Relationships
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, type])
+}
+
+// Direct messaging between users
+model Message {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  content     String
+  
+  // Relationships
+  senderId    String
+  sender      User     @relation(fields: [senderId], references: [id])
+  receiverId  String
+  receiver    User     @relation("MessageReceiver", fields: [receiverId], references: [id])
+  
+  // Message status
+  read        Boolean  @default(false)
+  readAt      DateTime?
+
+  @@index([senderId])
+  @@index([receiverId])
+}
