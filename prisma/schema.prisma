@@ -19,6 +19,7 @@ model User {
   image         String?   // Profile image URL
   points        Int       @default(0)
   password    String?   // For credentials auth
+  isAdmin     Boolean   @default(false)
   
   // Social links
   instagramHandle String?

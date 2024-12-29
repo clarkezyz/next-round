@@ -14,19 +14,31 @@ declare module "next-auth" {
     user: {
       id: string;
       points: number;
-      // ...other user properties you want in session
+      isAdmin: boolean;  // add this
     } & DefaultSession["user"];
+  }
+
+  interface User {
+    points: number;
+    isAdmin: boolean;  // add this
   }
 }
 
 export const authOptions: NextAuthOptions = {
   callbacks: {
-    session: ({ session, user }) => ({
+    jwt: ({ token, user }) => {
+      if (user) {
+        token.id = user.id;
+        token.points = user.points;
+      }
+      return token;
+    },
+    session: ({ session, token }) => ({
       ...session,
       user: {
         ...session.user,
-        id: user.id,
-        points: user.points,
+        id: token.id as string,
+        points: token.points as number,
       },
     }),
   },
@@ -39,22 +51,31 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
+        console.log("Authorize attempt with email:", credentials?.email);
+        
         if (!credentials?.email || !credentials?.password) {
-          throw new Error("Invalid credentials");
+            console.log("Missing credentials");
+            throw new Error("Invalid credentials");
         }
         
         const user = await db.user.findUnique({
-          where: { email: credentials.email }
+            where: { email: credentials.email }
         });
         
-        if (!user) {
-          throw new Error("User not found");
+        console.log("User found:", !!user);
+        
+        if (!user || !user.password) {
+            console.log("User not found or no password");
+            throw new Error("User not found");
         }
         
-        const isValid = await(credentials.password, user.password);
+        const isValid = await compare(credentials.password, user.password);
+        
+        console.log("Password valid:", isValid);
         
         if (!isValid) {
-          throw new Error("Invalid password");
+            console.log("Invalid password");
+            throw new Error("Invalid password");
         }
         
         return {
@@ -62,8 +83,9 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           points: user.points,
-        };
-      }
+          isAdmin: user.isAdmin,  // add this
+      };
+    }
     })
   ],
   session: {

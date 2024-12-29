@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { loggerLink, unstable_httpBatchStreamLink } from "@trpc/client";
 import { createTRPCReact } from "@trpc/react-query";
 import { useState } from "react";
+import { type ReadonlyHeaders } from "next/dist/server/web/spec-extension/adapters/headers";
 
 import { type AppRouter } from "@/server/api/root";
 import { getUrl } from "./shared";
@@ -11,7 +12,10 @@ import superjson from "superjson";
 
 export const api = createTRPCReact<AppRouter>();
 
-export function TRPCReactProvider(props: { children: React.ReactNode; headers: Headers }) {
+export function TRPCReactProvider(props: { 
+  children: React.ReactNode; 
+  headers: Headers | ReadonlyHeaders;
+}) {
   const [queryClient] = useState(() => new QueryClient());
 
   const [trpcClient] = useState(() =>
