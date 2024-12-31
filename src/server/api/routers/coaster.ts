@@ -15,7 +15,9 @@ export const coasterRouter = createTRPCRouter({
       venueId: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // TODO: Add admin check here
+      if (!ctx.session.user.isAdmin) {
+        throw new TRPCError({ code: "UNAUTHORIZED" });
+      }
       const coaster = await createNewCoaster(input.artworkId, input.venueId);
       return coaster;
     }),
@@ -23,11 +25,13 @@ export const coasterRouter = createTRPCRouter({
   batchCreate: protectedProcedure
     .input(z.object({
       artworkId: z.string(),
-      count: z.number().min(1).max(100), // Limit batch size
+      count: z.number().min(1).max(100),
       venueId: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      // TODO: Add admin check here
+      if (!ctx.session.user.isAdmin) {
+        throw new TRPCError({ code: "UNAUTHORIZED" });
+      }
       const coasters = await batchCreateCoasters(
         input.artworkId,
         input.count,
@@ -36,8 +40,8 @@ export const coasterRouter = createTRPCRouter({
       return coasters;
     }),
 
-  // Public procedures
-  getByCode: publicProcedure
+  // Initial scan check - public endpoint for QR code scans
+  initialScanCheck: publicProcedure
     .input(z.object({
       code: z.string().length(4),
     }))
@@ -45,16 +49,18 @@ export const coasterRouter = createTRPCRouter({
       const coaster = await ctx.db.coaster.findUnique({
         where: { qrCode: input.code },
         include: {
-          artwork: {
+          artwork: true,
+          scans: {
+            orderBy: { createdAt: "asc" },
+            take: 1,
             include: {
-              artist: {
+              user: {
                 select: {
                   name: true,
                 },
               },
             },
           },
-          venue: true,
           scans: {
             orderBy: { createdAt: "desc" },
             take: 1,
@@ -69,27 +75,58 @@ export const coasterRouter = createTRPCRouter({
         });
       }
 
-      return coaster;
+      const isFirstScan = coaster.scans.length === 0;
+
+      if (isFirstScan) {
+        await ctx.db.artwork.update({
+          where: { id: coaster.artworkId },
+          data: { status: "APPROVED" },
+        });
+      }
+
+      return {
+        coaster,
+        isFirstScan,
+        hasSession: !!ctx.session,
+        artwork: coaster.artwork,
+      };
     }),
 
-  // Previous procedures remain unchanged
-  getLatestArtwork: publicProcedure.query(async ({ ctx }) => {
-    return ctx.db.artwork.findMany({
-      take: 10,
-      orderBy: { createdAt: "desc" },
-      include: {
-        artist: {
-          select: {
-            name: true,
-          },
-        },
-      },
-    });
-  }),
+  // Guest comment on first scan
+  addGuestComment: publicProcedure
+    .input(z.object({
+      coasterId: z.string(),
+      comment: z.string().max(144),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const existingScan = await ctx.db.scan.findFirst({
+        where: { coasterId: input.coasterId },
+      });
 
+      if (existingScan) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Comments only allowed on first scan",
+        });
+      }
+
+      const scan = await ctx.db.scan.create({
+        data: {
+          coasterId: input.coasterId,
+          isFirstScan: true,
+          pointsEarned: 0,
+          guestComment: input.comment,
+        },
+      });
+
+      return scan;
+    }),
+
+  // Authenticated user scan
   scanCoaster: protectedProcedure
     .input(z.object({ 
       qrCode: z.string(),
+      comment: z.string().optional(),
       location: z.object({
         latitude: z.number().optional(),
         longitude: z.number().optional(),
@@ -145,6 +182,17 @@ export const coasterRouter = createTRPCRouter({
           isFirstScan,
           pointsEarned,
           location: input.location,
+          ...(isFirstScan && input.comment ? {
+            comment: {
+              create: {
+                content: input.comment,
+                userId: ctx.session.user.id,
+              },
+            },
+          } : {}),
+        },
+        include: {
+          comment: true,
         },
       });
 
@@ -182,17 +230,37 @@ export const coasterRouter = createTRPCRouter({
       };
     }),
 
-  getUserScans: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.scan.findMany({
-      where: { userId: ctx.session.user.id },
-      include: {
-        coaster: {
-          include: {
-            artwork: true,
+  // Get user's scan history
+  getUserScans: protectedProcedure
+    .query(async ({ ctx }) => {
+      return ctx.db.scan.findMany({
+        where: { userId: ctx.session.user.id },
+        include: {
+          coaster: {
+            include: {
+              artwork: true,
+            },
+          },
+          comment: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+    }),
+
+  // Get latest artwork (for gallery/feed)
+  getLatestArtwork: publicProcedure
+    .query(async ({ ctx }) => {
+      return ctx.db.artwork.findMany({
+        take: 10,
+        where: { status: "APPROVED" },
+        orderBy: { createdAt: "desc" },
+        include: {
+          artist: {
+            select: {
+              name: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-  }),
+      });
+    }),
 });

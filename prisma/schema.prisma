@@ -146,6 +146,8 @@ enum CoasterStatus {
 model Scan {
   id          String   @id @default(cuid())
   createdAt   DateTime @default(now())
+  guestComment String?  // Add this field for anonymous first-scan comments
+  comment     Comment?  // Keep this for logged-in user comments
   
   // Relationships
   userId      String

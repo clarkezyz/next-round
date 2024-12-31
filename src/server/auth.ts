@@ -14,13 +14,21 @@ declare module "next-auth" {
     user: {
       id: string;
       points: number;
-      isAdmin: boolean;  // add this
+      isAdmin: boolean;  
     } & DefaultSession["user"];
   }
 
   interface User {
     points: number;
-    isAdmin: boolean;  // add this
+    isAdmin: boolean;  
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    id: string;
+    points: number;
+    isAdmin: boolean;
   }
 }
 
@@ -30,6 +38,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user.id;
         token.points = user.points;
+        token.isAdmin = user.isAdmin;
       }
       return token;
     },
@@ -39,6 +48,7 @@ export const authOptions: NextAuthOptions = {
         ...session.user,
         id: token.id as string,
         points: token.points as number,
+        isAdmin: token.isAdmin as boolean,
       },
     }),
   },
